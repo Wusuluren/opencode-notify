@@ -44,6 +44,17 @@ import {
 } from "./notify/status"
 import { parseOscTitleContext, writeOscTitleBestEffort } from "./notify/title"
 
+interface NtfyConfig {
+	/** ntfy.sh topic name */
+	topic: string
+	/** ntfy.sh server URL (default: https://ntfy.sh) */
+	server?: string
+	/** Priority: 1-5, min-max, or default (default: default) */
+	priority?: string
+	/** Comma-separated tags/emojis */
+	tags?: string[]
+}
+
 interface NotifyConfig {
 	/** Notify for child/sub-session events (default: false) */
 	notifyChildSessions: boolean
@@ -62,6 +73,8 @@ interface NotifyConfig {
 	}
 	/** Override terminal detection (optional) */
 	terminal?: string
+	/** ntfy.sh push notification configuration */
+	ntfy?: NtfyConfig
 }
 
 interface TerminalInfo {
@@ -382,6 +395,31 @@ function buildPermissionEventDedupeKey(properties: unknown): string | null {
 	return `permission:request:${normalizedRequestID}`
 }
 
+async function sendNtfyNotification(options: NotificationOptions, ntfyConfig: NtfyConfig): Promise<void> {
+	const server = (ntfyConfig.server || "https://ntfy.sh").replace(/\/+$/, "")
+	const url = `${server}/${ntfyConfig.topic}`
+
+	const headers: Record<string, string> = {
+		Title: options.title,
+	}
+
+	if (options.subtitle) {
+		headers.Subtitle = options.subtitle
+	}
+	if (ntfyConfig.priority) {
+		headers.Priority = ntfyConfig.priority
+	}
+	if (ntfyConfig.tags?.length) {
+		headers.Tags = ntfyConfig.tags.join(",")
+	}
+
+	try {
+		await fetch(url, { method: "POST", headers, body: options.message })
+	} catch {
+		// Best-effort, silently ignore
+	}
+}
+
 async function sendDesktopNotification(options: NotificationOptions): Promise<void> {
 	const { title, message, sound, terminalInfo } = options
 
@@ -406,6 +444,7 @@ async function sendDesktopNotification(options: NotificationOptions): Promise<vo
 async function sendNotification(
 	options: NotificationOptions,
 	runtime: NotificationRuntime,
+	ntfyConfig?: NtfyConfig,
 ): Promise<void> {
 	await sendNotificationWithFallback({
 		preferCmux: runtime.preferCmux,
@@ -420,6 +459,11 @@ async function sendNotification(
 			),
 		sendDesktopNotification: () => sendDesktopNotification(options),
 	})
+
+	// Fire-and-forget ntfy.sh push notification
+	if (ntfyConfig?.topic) {
+		sendNtfyNotification(options, ntfyConfig)
+	}
 }
 
 // ==========================================
@@ -466,6 +510,7 @@ async function handleSessionIdle(
 			terminalInfo,
 		},
 		notificationRuntime,
+		config.ntfy,
 	)
 }
 
@@ -499,6 +544,7 @@ async function handleSessionError(
 			terminalInfo,
 		},
 		notificationRuntime,
+		config.ntfy,
 	)
 }
 
@@ -524,6 +570,7 @@ async function handlePermissionUpdated(
 			terminalInfo,
 		},
 		notificationRuntime,
+		config.ntfy,
 	)
 }
 
@@ -545,6 +592,7 @@ async function handleQuestionAsked(
 			terminalInfo,
 		},
 		notificationRuntime,
+		config.ntfy,
 	)
 }
 
